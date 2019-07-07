@@ -2,7 +2,7 @@ import Promit from "./Promit"
 import PromiseState from "./PromiseState"
 
 const util = {
-	unwrap(promise:Promit, func:any, value:any) {
+	unwrap(promise:Promit, func:any, value:any) {	// 假定value永遠都不會是promise
 		process.nextTick(function():any {
 			let returnValue
 			try {
@@ -59,14 +59,14 @@ const util = {
 		}
 		return out
 	},
-	resolve(promise: Promit, value: any): Promit {
-		if (value instanceof Promise) {	// 返回了一個promise
+	resolve(promise: Promit, value: any): Promit {	// value可能為promise
+		if (value instanceof Promit) {	// 返回了一個promise
 			// eslint-disable-next-line promise/catch-or-return
 			process.nextTick(() => {
-				return value.then((data) => {
+				return value.then((data:any) => {
 					util.resolve(promise, data)
 					return null
-				}, (reason) => {
+				}, (reason:any) => {
 					util.reject(promise, reason)
 					return null
 				})
