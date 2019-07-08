@@ -2,7 +2,7 @@ import QueueItem from "./Queueitem"
 import PromiseState from "./PromiseState"
 import util from "./util"
 
-const INTERNAL= ():void=> { }
+const INTERNAL = ():void=> { }
 
 class Promit {
     outcome: any = void 0
@@ -130,6 +130,9 @@ class Promit {
 	}
 	catch(onRejected:Function):Promit {
 		return this.then(undefined, onRejected)
+	}
+	toString():string {
+		return `Promise {[[PromiseStatus]]: "${this.state}" [[PromiseValue]]: ${this.outcome}}`
 	}
 }
 
