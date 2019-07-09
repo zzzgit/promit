@@ -1,5 +1,4 @@
 import Promit from "./Promit"
-import util from "./util"
 
 
 /**
@@ -20,10 +19,10 @@ class QueueItem {
 		}
 	}
 	callFulfilled(value: any): void {
-		util.unwrap(this.promit, this.onFulfilled, value)
+		this.promit.unwrap(this.onFulfilled, value)
 	}
 	callRejected(reason: any): void {
-		util.unwrap(this.promit, this.onRejected, reason)
+		this.promit.unwrap(this.onRejected, reason)
 	}
 }
 

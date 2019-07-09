@@ -1,24 +1,24 @@
 import QueueItem from "./Queueitem"
 import PromiseState from "./PromiseState"
-import util from "./util"
+
 
 const INTERNAL = ():void=> { }
 
 class Promit {
-    outcome: any = void 0
-    queue: QueueItem[] = []
-	handled: boolean = false
+	private outcome: any = void 0
+	private queue: QueueItem[] = []
+	private handled: boolean = false
 	state: PromiseState = PromiseState.PENDING
 
 	static resolve(value:any) :Promit {
 		if (value instanceof this) {
 			return value
 		}
-		return util.resolve(new Promit(INTERNAL), value)
+		return new Promit(INTERNAL).resolve(value)
 	}
 	static reject(reason: any):Promit {
 		const promise = new this(INTERNAL)
-		return util.reject(promise, reason)
+		return promise.reject(reason)
 	}
 	static all(iterable:Promit[]):Promit {
 		if (Object.prototype.toString.call(iterable) !== '[object Array]') {
@@ -42,14 +42,14 @@ class Promit {
 			return Promit.resolve(value).then(resolveFromAll, (error:Error):void =>{
 				if (!called) {
 					called = true
-					util.reject(promise, error)
+					promise.reject(error)
 				}
 			})
 			function resolveFromAll(outValue:any):void {
 				values[i] = outValue
 				if (++resolved === len && !called) {
 					called = true
-					util.resolve(promise, values)
+					promise.resolve(values)
 				}
 			}
 		}
@@ -73,13 +73,13 @@ class Promit {
 			return Promit.resolve(value).then(function(response:any):any {
 				if (!called) {
 					called = true
-					util.resolve(promise, response)
+					promise.resolve(response)
 				}
 				return null
 			}, function(error:Error):void {
 				if (!called) {
 					called = true
-					util.reject(promise, error)
+					promise.reject(error)
 				}
 			})
 		}
@@ -89,8 +89,39 @@ class Promit {
 			throw new TypeError('resolver must be a function')
 		}
 		if (resolver !== INTERNAL) {
-			util.safelyResolveThenable(this, resolver)
+			this.safelyResolveThenable(resolver)
 		}
+	}
+	private safelyResolveThenable(thenable: Function):void {
+		// eslint-disable-next-line @typescript-eslint/no-this-alias
+		const self = this
+		function onError(e: Error): any {
+			self.reject(e)
+		}
+		function onSuccess(value: any): any {
+			self.resolve(value)
+		}
+		function tryToUnwrap(): void {
+			thenable(onSuccess, onError) // 調用構造函數中的函數
+		}
+		const result: any = self.tryCatch(tryToUnwrap)
+		if (result.status === 'error') {
+			onError(result.value)
+		}
+	}
+	private tryCatch(func: Function, value?: any): any {
+		const out: { value: any; status: string } = {
+			value: null,
+			status: "",
+		}
+		try {
+			out.value = func(value)
+			out.status = 'success'
+		} catch (e) {
+			out.status = 'error'
+			out.value = e
+		}
+		return out
 	}
 	finally(cbd: any):Promit {
 		if (typeof cbd !== 'function') {
@@ -125,7 +156,7 @@ class Promit {
 			return promise
 		}
 		const resolver = this.state === PromiseState.FULFILLED ? onFulfilled : onRejected
-		util.unwrap(promise, resolver, this.outcome)	//  unwrap 下一級
+		promise.unwrap(resolver, this.outcome)	//  unwrap 下一級
 		return promise
 	}
 	catch(onRejected:Function):Promit {
@@ -133,6 +164,82 @@ class Promit {
 	}
 	toString():string {
 		return `Promise {[[PromiseStatus]]: "${this.state}" [[PromiseValue]]: ${this.outcome}}`
+	}
+	unwrap(func: any, value: any):void {	// 假定value永遠都不會是promise
+		// eslint-disable-next-line @typescript-eslint/no-this-alias
+		const self = this
+		process.nextTick(function(): any {
+			let returnValue
+			try {
+				returnValue = func(value) // 取then裡面的值
+			} catch (e) {
+				return self.reject(e)
+			}
+			if (returnValue === self) { // return 了 this?
+				self.reject(new TypeError('Cannot resolve promise with itself'))
+			} else {
+				self.resolve(returnValue)
+			}
+		})
+	}
+	private reject(reason: any): Promit {
+		if (this.state !== PromiseState.PENDING) {
+			return this
+		}
+		this.state = PromiseState.REJECTED
+		this.outcome = reason
+		// eslint-disable-next-line @typescript-eslint/no-this-alias
+		const self = this
+		if (this.handled === false) {
+			process.nextTick(function() {
+				if (self.handled === false) {
+					process.emitWarning('unhandledRejection', 'Warning')
+				}
+			})
+		}
+		let i = -1
+		const len = this.queue.length
+		while (++i < len) {
+			if (this.queue[i].onRejected) {
+				this.queue[i].callRejected(reason)
+			} else {
+				this.queue[i].promit.reject(reason)
+			}
+		}
+		return this
+	}
+	private resolve(value: any): Promit {	// value可能為promise
+		if (this.state !== PromiseState.PENDING) {
+			return this
+		}
+		// eslint-disable-next-line @typescript-eslint/no-this-alias
+		const self = this
+		if (value instanceof Promit) {	// 返回了一個promise
+			// eslint-disable-next-line promise/catch-or-return
+			process.nextTick(() => {
+				return value.then((data: any) => {
+					self.resolve(data)
+					return null
+				}, (reason: any) => {
+					self.reject(reason)
+					return null
+				})
+			})
+		} else {
+			self.state = PromiseState.FULFILLED
+			self.outcome = value
+			// 上面改變本身狀態，下面進行下一級操作
+			let i = -1
+			const len = self.queue.length
+			while (++i < len) {
+				if (self.queue[i].onFulfilled) {
+					self.queue[i].callFulfilled(value)
+				} else {
+					self.queue[i].promit.resolve(value)
+				}
+			}
+		}
+		return this
 	}
 }
 
